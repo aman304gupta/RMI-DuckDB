@@ -39,6 +39,7 @@ pgm::DynamicPGMIndex<double, double> double_dynamic_index;
 
 int load_end_point = 0;
 std::vector<vector<unique_ptr<Base> > > results;
+map<string,pair<string,string>> index_type_table_name_map;
 
 inline void PgmScalarFun(DataChunk &args, ExpressionState &state, Vector &result) {
     auto &name_vector = args.data[0];
@@ -60,6 +61,40 @@ inline void PgmOpenSSLVersionScalarFun(DataChunk &args, ExpressionState &state, 
         });
 }
 
+template <typename K>
+void print_stats(){
+    if(typeid(K)==typeid(DOUBLE_KEY_TYPE)){
+        std::cout << "Total size in bytes: " << double_dynamic_index.size_in_bytes() << " bytes\n";
+        std::cout << "Index size in bytes: " << double_dynamic_index.index_size_in_bytes() << " bytes\n";
+        std::cout << "Number of elements: " << double_dynamic_index.size() << "\n";
+
+    }
+    // else if(typeid(K)==typeid(UNSIGNED_INT64_KEY_TYPE)){
+    //     auto stats = unsigned_big_int_alex_index.get_stats();
+    //     std::cout<<"Stats about the index \n";
+    //     std::cout<<"***************************\n";
+    //     std::cout<<"Number of keys : "<<stats.num_keys<<"\n";
+    //     std::cout<<"Number of model nodes : "<<stats.num_model_nodes<<"\n";
+    //     std::cout<<"Number of data nodes: "<<stats.num_data_nodes<<"\n";
+    // }
+    // else if(typeid(K)==typeid(INT_KEY_TYPE)){
+    //     auto stats = index.get_stats();
+    //     std::cout<<"Stats about the index \n";
+    //     std::cout<<"***************************\n";
+    //     std::cout<<"Number of keys : "<<stats.num_keys<<"\n";
+    //     std::cout<<"Number of model nodes : "<<stats.num_model_nodes<<"\n";
+    //     std::cout<<"Number of data nodes: "<<stats.num_data_nodes<<"\n";
+    // }
+    // else{
+    //     auto stats = big_int_alex_index.get_stats();
+    //     std::cout<<"Stats about the index \n";
+    //     std::cout<<"***************************\n";
+    //     std::cout<<"Number of keys : "<<stats.num_keys<<"\n";
+    //     std::cout<<"Number of model nodes : "<<stats.num_model_nodes<<"\n";
+    //     std::cout<<"Number of data nodes: "<<stats.num_data_nodes<<"\n";
+    // }
+
+}
 
 template <typename K,typename P>
 void bulkLoadIntoIndex(duckdb::Connection & con,std::string table_name,int column_index){
@@ -80,7 +115,10 @@ void bulkLoadIntoIndex<double,INDEX_PAYLOAD_TYPE>(duckdb::Connection & con,std::
    /*
     Phase 2: Bulk load the data from the results vector into the pair array that goes into the index.
    */
-   std::pair<double,INDEX_PAYLOAD_TYPE>* bulk_load_values = new std::pair<double,INDEX_PAYLOAD_TYPE>[num_keys];  
+   std::vector<std::pair<double,INDEX_PAYLOAD_TYPE>> bulk_load_values;
+   bulk_load_values.reserve(num_keys);
+
+ 
     int max_key = INT_MIN;
     for (int i=0;i<results.size();i++){
         int row_id = i;
@@ -98,21 +136,21 @@ void bulkLoadIntoIndex<double,INDEX_PAYLOAD_TYPE>(duckdb::Connection & con,std::
     */
 
     auto start_time = std::chrono::high_resolution_clock::now();
-    std::sort(bulk_load_values,bulk_load_values+num_keys,[](auto const& a, auto const& b) { return a.first < b.first; });
+    std::sort(bulk_load_values.begin(),bulk_load_values.end(),[](auto const& a, auto const& b) { return a.first < b.first; });
 
     /*
     Phase 4: Bulk load the sorted values into the index.
     */
 
 
+     for (const auto &pair : bulk_load_values) {
+        double_dynamic_index.insert_or_assign(pair.first, pair.second);
+    }
     
-    // double_alex_index.bulk_load(bulk_load_values, num_keys);
-    // auto end_time = std::chrono::high_resolution_clock::now();
-    // std::chrono::duration<double> elapsed_seconds = end_time - start_time;
-    // std::cout << "Time taken to bulk load: " << elapsed_seconds.count() << " seconds\n\n\n";
-    // print_stats<DOUBLE_KEY_TYPE>();
-
-    double_dynamic_index.insert(bulk_load_values, num_keys);
+    auto end_time = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed_seconds = end_time - start_time;
+    std::cout << "Time taken to bulk load: " << elapsed_seconds.count() << " seconds\n\n\n";
+    print_stats<DOUBLE_KEY_TYPE>();
 }
 
 
