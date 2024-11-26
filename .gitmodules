@@ -6,3 +6,6 @@
 	path = extension-ci-tools
 	url = https://github.com/duckdb/extension-ci-tools
 	branch = main
+[submodule "src/PGM"]
+	path = src/PGM
+	url = https://github.com/gvinciguerra/PGM-index.git

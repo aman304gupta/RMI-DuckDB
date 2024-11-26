@@ -1,0 +1,23 @@
+# name: test/sql/pgm.test
+# description: test pgm extension
+# group: [pgm]
+
+# Before we load the extension, this will fail
+statement error
+SELECT pgm('Sam');
+----
+Catalog Error: Scalar Function with name pgm does not exist!
+
+# Require statement will ensure this test is run with this extension loaded
+require pgm
+
+# Confirm the extension works
+query I
+SELECT pgm('Sam');
+----
+Pgm Sam 🐥
+
+query I
+SELECT pgm_openssl_version('Michael') ILIKE 'Pgm Michael, my linked OpenSSL version is OpenSSL%';
+----
+true

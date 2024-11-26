@@ -1,30 +1,43 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.12)
 
-# Set extension name here
-set(TARGET_NAME quack)
+# Set extension name
+set(TARGET_NAME pgm)
 
-# DuckDB's extension distribution supports vcpkg. As such, dependencies can be added in ./vcpkg.json and then
-# used in cmake with find_package. Feel free to remove or replace with other dependencies.
-# Note that it should also be removed from vcpkg.json to prevent needlessly installing it..
+# DuckDB's extension distribution supports vcpkg. Dependencies can be added in ./vcpkg.json
 find_package(OpenSSL REQUIRED)
 
-set(EXTENSION_NAME ${TARGET_NAME}_extension)
-set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
-
+# Project settings
 project(${TARGET_NAME})
-include_directories(src/include)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(EXTENSION_SOURCES src/quack_extension.cpp)
+# Include directories
+include_directories(src/include)         # For DuckDB-specific headers
+include_directories(src/PGM/include)     # For PGM-index headers
 
+# Source files for the extension
+set(EXTENSION_SOURCES src/pgm_extension.cpp)
+
+# Create static extension
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
-build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
 
-# Link OpenSSL in both the static library as the loadable extension
-target_link_libraries(${EXTENSION_NAME} OpenSSL::SSL OpenSSL::Crypto)
-target_link_libraries(${LOADABLE_EXTENSION_NAME} OpenSSL::SSL OpenSSL::Crypto)
+# Create loadable extension
+build_loadable_extension(${TARGET_NAME} "" ${EXTENSION_SOURCES})
 
+# Explicitly link OpenSSL libraries after targets are created
+if(TARGET ${TARGET_NAME}_extension)
+    target_link_libraries(${TARGET_NAME}_extension OpenSSL::SSL OpenSSL::Crypto)
+endif()
+
+if(TARGET ${TARGET_NAME}_loadable_extension)
+    target_link_libraries(${TARGET_NAME}_loadable_extension OpenSSL::SSL OpenSSL::Crypto)
+endif()
+
+# Install the extension
 install(
-  TARGETS ${EXTENSION_NAME}
+  TARGETS ${TARGET_NAME}_extension
   EXPORT "${DUCKDB_EXPORT_SET}"
   LIBRARY DESTINATION "${INSTALL_LIB_DIR}"
-  ARCHIVE DESTINATION "${INSTALL_LIB_DIR}")
+  ARCHIVE DESTINATION "${INSTALL_LIB_DIR}"
+)
