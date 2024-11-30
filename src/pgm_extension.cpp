@@ -98,7 +98,7 @@ void print_stats(){
     }
     else{ //big int
         std::cout << "Total size in bytes: " << big_int_dynamic_index.size_in_bytes() << " bytes\n";
-        std::cout << "Index size in bytes: " << big_int_dynamic_index.index_size_in_bytes() << " bytes\n";
+        std::cout << "Big Int Dynamic Index size in bytes: " << big_int_dynamic_index.index_size_in_bytes() << " bytes\n";
         std::cout << "Number of elements: " << big_int_dynamic_index.size() << "\n";
     }
 
@@ -138,7 +138,7 @@ void bulkLoadIntoIndex<double,INDEX_PAYLOAD_TYPE>(duckdb::Connection & con,std::
         double value_ = static_cast<double_t>(static_cast<DoubleData *>(data1)->value);
         
         //std::cout<<"after key"<<"\n";
-        bulk_load_values[i] = {key_,value_};
+        bulk_load_values.emplace_back(key_,value_);
     }
     /**
      Phase 3: Sort the bulk load values array based on the key values.
@@ -171,7 +171,7 @@ void bulkLoadIntoIndex<int64_t,INDEX_PAYLOAD_TYPE>(duckdb::Connection & con,std:
     unique_ptr<MaterializedQueryResult> result = con.Query(query);
     results = result->getContents();
     int num_keys = results.size();
-    //std::cout<<"Num Keys : "<<num_keys<<"\n";
+    std::cout<<"Num Keys : "<<num_keys<<"\n";
 
    /*
     Phase 2: Bulk load the data from the results vector into the pair array that goes into the index.
@@ -181,20 +181,26 @@ void bulkLoadIntoIndex<int64_t,INDEX_PAYLOAD_TYPE>(duckdb::Connection & con,std:
    std::vector<std::pair<double,INDEX_PAYLOAD_TYPE>> bulk_load_values;
    bulk_load_values.reserve(num_keys);
 
-    //std::cout<<"Col index "<<column_index<<"\n";    
+    std::cout<<"Col index "<<column_index<<"\n";    
     int max_key = INT_MIN;
     for (int i=0;i<results.size();i++){
         int row_id = i;
-        //std::cout<<"before key"<<"\n";
+        std::cout<<"before key"<<"\n";
         auto *data = dynamic_cast<Base *>(results[i][column_index].get());
         auto *data1 = dynamic_cast<Base *>(results[i][column_index + 1].get());
         
         int64_t key_ = static_cast<int64_t>(static_cast<BigIntData *>(data)->value);
         double value_ = static_cast<double_t>(static_cast<DoubleData *>(data1)->value);
         
-        //std::cout<<"after key"<<"\n";
-        bulk_load_values[i] = {key_,value_};
+        // std::cout<<"after key: "<<key_<<" Value: "<<value_<<"\n";
+
+        bulk_load_values.emplace_back(key_,value_);
+
+        std::cout<<"Bulk Load values : "<<bulk_load_values[i].first<<" "<<bulk_load_values[i].second<<"\n";
     }
+
+    std::cout<<"Bulk Load Values Size Before Sort: "<<bulk_load_values.size()<<"\n";
+
     /**
      Phase 3: Sort the bulk load values array based on the key values.
     */
@@ -206,11 +212,15 @@ void bulkLoadIntoIndex<int64_t,INDEX_PAYLOAD_TYPE>(duckdb::Connection & con,std:
     /*
     Phase 4: Bulk load the sorted values into the index.
     */
+
+    std::cout<<"Bulk Load Values Size : "<<bulk_load_values.size()<<"\n";
     
     // big_int_dynamic_index.bulk_load(bulk_load_values, num_keys);
 
     for (const auto &pair : bulk_load_values) {
+        std::cout<<"Key : "<<pair.first<<" Value : "<<pair.second<<"\n";
         big_int_dynamic_index.insert_or_assign(pair.first, pair.second);
+        std::cout<<"Index Size : "<<big_int_dynamic_index.size()<<"\n";
     }
 
     auto end_time = std::chrono::high_resolution_clock::now();
@@ -249,7 +259,7 @@ void bulkLoadIntoIndex<UNSIGNED_INT64_KEY_TYPE,INDEX_PAYLOAD_TYPE>(duckdb::Conne
         double value_ = static_cast<double_t>(static_cast<DoubleData *>(data1)->value);
         
         //std::cout<<"after key"<<"\n";
-        bulk_load_values[i] = {key_,value_};
+        bulk_load_values.emplace_back(key_,value_);
     }
     /**
      Phase 3: Sort the bulk load values array based on the key values.
@@ -379,11 +389,11 @@ void createPGMIndexPragmaFunction(ClientContext &context, const FunctionParamete
     }
     else{
         duckdb::Connection con(*context.db);
-        // std::cout<<"Column found at index "<<column_index<<"\n";
-        // std::cout<<"Creating an alex index for this column"<<"\n";
+        std::cout<<"Column found at index "<<column_index<<"\n";
+        std::cout<<"Creating an pgm index for this column"<<"\n";
         // std::cout<<"Column Type "<<typeid(column_type).name()<<"\n";
         // std::cout<<"Column Type "<<typeid(double).name()<<"\n";
-        // std::cout<<"Column type to string "<<column_type.ToString()<<"\n";
+        std::cout<<"Column type to string "<<column_type.ToString()<<"\n";
         std::string columnTypeName = column_type.ToString();
         if(columnTypeName == "DOUBLE"){
             bulkLoadIntoIndex<DOUBLE_KEY_TYPE,INDEX_PAYLOAD_TYPE>(con,table_name,column_index);
@@ -511,32 +521,32 @@ void functionLoadBenchmark(ClientContext &context, const FunctionParameters &par
     
     std::cout<<"Benchmark name "<<benchmarkName<<"\n";
     if(benchmarkName.compare("lognormal")==0){
-        // benchmarkFile = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/lognormal-190M.bin.data";
-        benchmarkFile = "/home/aman304gupta/Documents/RMI-DuckDB/src/lognormal-190M.bin.data";
+        // benchmarkFile = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/lognormal-190M.bin";
+        benchmarkFile = "/home/aman304gupta/Documents/RMI-DuckDB/src/lognormal-190M.bin";
         benchmarkFileType = "binary";
         CREATE_QUERY = "CREATE TABLE "+tableName+"(key BIGINT, payload double);";
         executeQuery(con,CREATE_QUERY);
         load_benchmark_data_into_table<INT64_KEY_TYPE,GENERAL_PAYLOAD_TYPE>(benchmarkFile,benchmarkFileType,con,tableName,NUM_KEYS,num_batches_insert,per_batch);
     }
     else if(benchmarkName.compare("longitudes")==0){
-        // benchmarkFile = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/longitudes-200M.bin.data";
-        benchmarkFile = "/home/aman304gupta/Documents/RMI-DuckDB/src/longitudes-200M.bin.data";
+        // benchmarkFile = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/longitudes-200M.bin";
+        benchmarkFile = "/home/aman304gupta/Documents/RMI-DuckDB/src/longitudes-200M.bin";
         benchmarkFileType = "binary";
         CREATE_QUERY = "CREATE TABLE "+tableName+"(key double, payload double);";
         executeQuery(con,CREATE_QUERY);
         load_benchmark_data_into_table<DOUBLE_KEY_TYPE,GENERAL_PAYLOAD_TYPE>(benchmarkFile,benchmarkFileType,con,tableName,NUM_KEYS,num_batches_insert,per_batch);
     }
     else if(benchmarkName.compare("longlat")==0){
-        // benchmarkFile = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/longlat-200M.bin.data";
-        benchmarkFile = "/home/aman304gupta/Documents/RMI-DuckDB/src/longlat-200M.bin.data";
+        // benchmarkFile = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/longlat-200M.bin";
+        benchmarkFile = "/home/aman304gupta/Documents/RMI-DuckDB/src/longlat-200M.bin";
         benchmarkFileType = "binary";
         CREATE_QUERY = "CREATE TABLE "+tableName+"(key double, payload double);";
         executeQuery(con,CREATE_QUERY);
         load_benchmark_data_into_table<DOUBLE_KEY_TYPE,GENERAL_PAYLOAD_TYPE>(benchmarkFile,benchmarkFileType,con,tableName,NUM_KEYS,num_batches_insert,per_batch);
     }
     else if(benchmarkName.compare("ycsb")==0){
-        // benchmarkFile = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/ycsb-200M.bin.data";
-        benchmarkFile = "/home/aman304gupta/Documents/RMI-DuckDB/src/ycsb-200M.bin.data";
+        // benchmarkFile = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/ycsb-200M.bin";
+        benchmarkFile = "/home/aman304gupta/Documents/RMI-DuckDB/src/ycsb-200M.bin";
         benchmarkFileType = "binary";
         std::cout<<"Table name "<<tableName<<"\n";
         CREATE_QUERY = "CREATE TABLE "+tableName+"(key UBIGINT , payload double);";
@@ -795,8 +805,8 @@ void functionRunLookupBenchmark(ClientContext &context, const FunctionParameters
 
     std::string keys_file_path = "";
     if(benchmarkName == "lognormal"){
-        // keys_file_path = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/lognormal-190M.bin.data";
-        keys_file_path = '/home/aman304gupta/Documents/RMI-DuckDB/src/lognormal-190M.bin.data';
+        // keys_file_path = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/lognormal-190M.bin";
+        keys_file_path = '/home/aman304gupta/Documents/RMI-DuckDB/src/lognormal-190M.bin';
         auto keys = new INT64_KEY_TYPE[load_end_point];
         std::cout<<"Loading binary data "<<std::endl;
         load_binary_data(keys, load_end_point, keys_file_path);
@@ -808,8 +818,8 @@ void functionRunLookupBenchmark(ClientContext &context, const FunctionParameters
         // }
     }
     else if(benchmarkName == "longlat"){
-        // keys_file_path = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/longlat-200M.bin.data";
-        keys_file_path = '/home/aman304gupta/Documents/RMI-DuckDB/src/longlat-200M.bin.data';
+        // keys_file_path = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/longlat-200M.bin";
+        keys_file_path = '/home/aman304gupta/Documents/RMI-DuckDB/src/longlat-200M.bin';
         auto keys = new DOUBLE_KEY_TYPE[load_end_point];
         std::cout<<"Loading binary data "<<std::endl;
         load_binary_data(keys, load_end_point, keys_file_path);
@@ -821,8 +831,8 @@ void functionRunLookupBenchmark(ClientContext &context, const FunctionParameters
         // }
     }
     else if(benchmarkName=="ycsb"){
-        // keys_file_path = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/ycsb-200M.bin.data";
-        keys_file_path = '/home/aman304gupta/Documents/RMI-DuckDB/src/ycsb-200M.bin.data';
+        // keys_file_path = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/ycsb-200M.bin";
+        keys_file_path = '/home/aman304gupta/Documents/RMI-DuckDB/src/ycsb-200M.bin';
         auto keys = new INT64_KEY_TYPE[load_end_point];
         std::cout<<"Loading binary data "<<std::endl;
         load_binary_data(keys, load_end_point, keys_file_path);
@@ -834,8 +844,8 @@ void functionRunLookupBenchmark(ClientContext &context, const FunctionParameters
         // }
     }
     else if(benchmarkName == "longitudes"){
-        // keys_file_path = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/longitudes-200M.bin.data";
-        keys_file_path = '/home/aman304gupta/Documents/RMI-DuckDB/src/longitudes-200M.bin.data';
+        // keys_file_path = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/longitudes-200M.bin";
+        keys_file_path = '/home/aman304gupta/Documents/RMI-DuckDB/src/longitudes-200M.bin';
         auto keys = new DOUBLE_KEY_TYPE[load_end_point];
         std::cout<<"Loading binary data "<<std::endl;
         load_binary_data(keys, load_end_point, keys_file_path); 
