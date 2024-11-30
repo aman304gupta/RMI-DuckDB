@@ -131,10 +131,11 @@ void bulkLoadIntoIndex<double,INDEX_PAYLOAD_TYPE>(duckdb::Connection & con,std::
     for (int i=0;i<results.size();i++){
         int row_id = i;
         //std::cout<<"before key"<<"\n";
-        auto rrr = results[i][column_index].get();
+        auto *data = dynamic_cast<Base *>(results[i][column_index].get());
+        auto *data1 = dynamic_cast<Base *>(results[i][column_index + 1].get());
         
-        double key_ = dynamic_cast<DoubleData*>(rrr)->value;
-        double value_ = dynamic_cast<DoubleData*>(results[i][column_index+1].get())->value;
+        double key_ = static_cast<double_t>(static_cast<DoubleData *>(data)->value);
+        double value_ = static_cast<double_t>(static_cast<DoubleData *>(data1)->value);
         
         //std::cout<<"after key"<<"\n";
         bulk_load_values[i] = {key_,value_};
@@ -185,10 +186,11 @@ void bulkLoadIntoIndex<int64_t,INDEX_PAYLOAD_TYPE>(duckdb::Connection & con,std:
     for (int i=0;i<results.size();i++){
         int row_id = i;
         //std::cout<<"before key"<<"\n";
-        auto rrr = results[i][column_index].get();
+        auto *data = dynamic_cast<Base *>(results[i][column_index].get());
+        auto *data1 = dynamic_cast<Base *>(results[i][column_index + 1].get());
         
-        int64_t key_ = dynamic_cast<BigIntData*>(rrr)->value;
-        double value_ = dynamic_cast<DoubleData*>(results[i][column_index+1].get())->value;
+        int64_t key_ = static_cast<int64_t>(static_cast<BigIntData *>(data)->value);
+        double value_ = static_cast<double_t>(static_cast<DoubleData *>(data1)->value);
         
         //std::cout<<"after key"<<"\n";
         bulk_load_values[i] = {key_,value_};
@@ -240,10 +242,11 @@ void bulkLoadIntoIndex<UNSIGNED_INT64_KEY_TYPE,INDEX_PAYLOAD_TYPE>(duckdb::Conne
     for (int i=0;i<results.size();i++){
         int row_id = i;
         //std::cout<<"before key"<<"\n";
-        auto rrr = results[i][column_index].get();
+        auto *data = dynamic_cast<Base *>(results[i][column_index].get());
+        auto *data1 = dynamic_cast<Base *>(results[i][column_index + 1].get());
         
-        UNSIGNED_INT64_KEY_TYPE key_ = dynamic_cast<UBigIntData*>(rrr)->value;
-        double value_ = dynamic_cast<DoubleData*>(results[i][column_index+1].get())->value;
+        UNSIGNED_INT64_KEY_TYPE key_ = static_cast<u_int64_t>(static_cast<UBigIntData *>(data)->value);
+        double value_ = static_cast<double_t>(static_cast<DoubleData *>(data1)->value);
         
         //std::cout<<"after key"<<"\n";
         bulk_load_values[i] = {key_,value_};
@@ -296,15 +299,19 @@ void bulkLoadIntoIndex<INT_KEY_TYPE,INDEX_PAYLOAD_TYPE>(duckdb::Connection & con
     int max_key = INT_MIN;
     for (int i=0;i<results.size();i++){
         int row_id = i;
+        if(results[i][column_index]) {
         std::cout<<"before key"<<"\n";
-        auto rrr = results[i][column_index].get();
+        auto *data = dynamic_cast<Base *>(results[i][column_index].get());
+        auto *data1 = dynamic_cast<Base *>(results[i][column_index + 1].get());
+        //auto rrr = results[i][column_index].get();
         
-        INT_KEY_TYPE key_ = dynamic_cast<IntData*>(rrr)->value;
-        double value_ = dynamic_cast<DoubleData*>(results[i][column_index+1].get())->value;
-        
+        INT_KEY_TYPE key_ = static_cast<int32_t>(static_cast<IntData *>(data)->value);
+        double value_ = static_cast<double_t>(static_cast<DoubleData *>(data1)->value);
+
         std::cout<<"after key"<<"\n";
         bulk_load_values.emplace_back(key_,  static_cast<INDEX_PAYLOAD_TYPE>(i));
         std::cout<<"Key : "<<key_<<" Value : "<<value_<<"\n";
+        }
     }
     /**
      Phase 3: Sort the bulk load values array based on the key values.
