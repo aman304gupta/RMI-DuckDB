@@ -23,7 +23,8 @@
 #include <numeric>
 #include<iomanip>
 #include <iostream>
-
+#include "pgm/pgm_index.hpp"
+#include "pgm/pgm_index_dynamic.hpp"
 #define DOUBLE_KEY_TYPE double
 #define GENERAL_PAYLOAD_TYPE double
 #define KEY_TYPE int
@@ -46,6 +47,10 @@ alex::Alex<INT64_KEY_TYPE, INDEX_PAYLOAD_TYPE> big_int_alex_index;
 alex::Alex<UNSIGNED_INT64_KEY_TYPE, INDEX_PAYLOAD_TYPE> unsigned_big_int_alex_index;
 alex::Alex<INT_KEY_TYPE, INDEX_PAYLOAD_TYPE> index;
 
+pgm::DynamicPGMIndex<double, double> double_dynamic_index;
+pgm::DynamicPGMIndex<INT64_KEY_TYPE, INDEX_PAYLOAD_TYPE> big_int_dynamic_index;
+pgm::DynamicPGMIndex<UNSIGNED_INT64_KEY_TYPE, INDEX_PAYLOAD_TYPE> unsigned_big_int_dynamic_index;
+pgm::DynamicPGMIndex<INT_KEY_TYPE, INDEX_PAYLOAD_TYPE> int_dynamic_index;
 map<string,pair<string,string>> index_type_table_name_map;
 
 static QualifiedName GetQualifiedName(ClientContext &context, const string &qname_str) {
@@ -230,28 +235,28 @@ void functionLoadBenchmark(ClientContext &context, const FunctionParameters &par
     
     std::cout<<"Benchmark name "<<benchmarkName<<"\n";
     if(benchmarkName.compare("lognormal")==0){
-        benchmarkFile = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/lognormal-190M.bin.data";
+        benchmarkFile = "/Users/maitrithaker/Desktop/proj/intelligent-duck/lognormal-190M.bin";
         benchmarkFileType = "binary";
         CREATE_QUERY = "CREATE TABLE "+tableName+"(key BIGINT, payload double);";
         executeQuery(con,CREATE_QUERY);
         load_benchmark_data_into_table<INT64_KEY_TYPE,GENERAL_PAYLOAD_TYPE>(benchmarkFile,benchmarkFileType,con,tableName,NUM_KEYS,num_batches_insert,per_batch);
     }
     else if(benchmarkName.compare("longitudes")==0){
-        benchmarkFile = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/longitudes-200M.bin.data";
+        benchmarkFile = "/Users/maitrithaker/Desktop/proj/intelligent-duck/longitudes-200M.bin";
         benchmarkFileType = "binary";
         CREATE_QUERY = "CREATE TABLE "+tableName+"(key double, payload double);";
         executeQuery(con,CREATE_QUERY);
         load_benchmark_data_into_table<DOUBLE_KEY_TYPE,GENERAL_PAYLOAD_TYPE>(benchmarkFile,benchmarkFileType,con,tableName,NUM_KEYS,num_batches_insert,per_batch);
     }
     else if(benchmarkName.compare("longlat")==0){
-        benchmarkFile = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/longlat-200M.bin.data";
+        benchmarkFile = "/Users/maitrithaker/Desktop/proj/intelligent-duck/longlat-200M.bin";
         benchmarkFileType = "binary";
         CREATE_QUERY = "CREATE TABLE "+tableName+"(key double, payload double);";
         executeQuery(con,CREATE_QUERY);
         load_benchmark_data_into_table<DOUBLE_KEY_TYPE,GENERAL_PAYLOAD_TYPE>(benchmarkFile,benchmarkFileType,con,tableName,NUM_KEYS,num_batches_insert,per_batch);
     }
     else if(benchmarkName.compare("ycsb")==0){
-        benchmarkFile = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/ycsb-200M.bin.data";
+        benchmarkFile = "/Users/maitrithaker/Desktop/proj/intelligent-duck/ycsb-200M.bin.data";
         benchmarkFileType = "binary";
         std::cout<<"Table name "<<tableName<<"\n";
         CREATE_QUERY = "CREATE TABLE "+tableName+"(key UBIGINT , payload double);";
@@ -751,36 +756,39 @@ void runLookupBenchmarkAlex(INT64_KEY_TYPE *keys){
 }
 
 template <typename K>
-void runLookupBenchmarkArt(K *keys,duckdb::Connection &con,std::string benchmark_name){
+void runLookupBenchmarkPgm(K *keys);
 
+template <>
+void runLookupBenchmarkPgm(double *keys){
 
-    std::string lookup_query = "SELECT key from "+benchmark_name+"_benchmark where key = ";
+    if(double_dynamic_index.size()==0){
+        std::cout<<"Index is empty. Please load the data into the index first."<<"\n";
+        return;
+    }
 
     std::cout<<"Running benchmark workload "<<"\n";
     int init_num_keys = load_end_point;
-    int total_num_keys = 4000000;
-    int batch_size = 100000;
+    int total_num_keys = 40000;
+    int batch_size = 10000;
     double insert_frac = 0.5;
     string lookup_distribution = "zipf";
     int i = init_num_keys;
-    int sum = 0;
-    int lookup_count = 0;
     long long cumulative_inserts = 0;
     long long cumulative_lookups = 0;
     int num_inserts_per_batch = static_cast<int>(batch_size * insert_frac);
     int num_lookups_per_batch = batch_size - num_inserts_per_batch;
     double cumulative_insert_time = 0;
     double cumulative_lookup_time = 0;
-    double time_limit = 0.3;
+    double time_limit = 0.1;
     bool print_batch_stats = true;
     
 
 
     auto workload_start_time = std::chrono::high_resolution_clock::now();
     int batch_no = 0;
+    INDEX_PAYLOAD_TYPE sum = 0;
     std::cout << std::scientific;
     std::cout << std::setprecision(3);
-    std::unique_ptr<PreparedStatement> prepare = con.Prepare("SELECT payload FROM "+benchmark_name+"_benchmark WHERE key = $1");
 
     while (true) {
         batch_no++;
@@ -788,8 +796,7 @@ void runLookupBenchmarkArt(K *keys,duckdb::Connection &con,std::string benchmark
         // Do lookups
         double batch_lookup_time = 0.0;
         if (i > 0) {
-
-        K* lookup_keys = nullptr;
+        double* lookup_keys = nullptr;
         if (lookup_distribution == "uniform") {
             lookup_keys = get_search_keys(keys, i, num_lookups_per_batch);
         } else if (lookup_distribution == "zipf") {
@@ -799,35 +806,19 @@ void runLookupBenchmarkArt(K *keys,duckdb::Connection &con,std::string benchmark
                     << std::endl;
             //return 1;
         }
-        vector<K>query_vector;
-
-        for (int j = 0; j < num_lookups_per_batch; j++) {
-            K key = lookup_keys[j];
-
-            // std::ostringstream stream;
-            // if(typeid(K)==typeid(DOUBLE_KEY_TYPE)){
-            //     stream << std::setprecision(std::numeric_limits<K>::max_digits10) << key;
-            // }
-            // else{
-            //     stream << key;
-            // }
-            // std::string ressy = stream.str();
-            // std::string query = lookup_query + ressy + ";";
-            query_vector.push_back(key);
-        }
-
         auto lookups_start_time = std::chrono::high_resolution_clock::now();
         for (int j = 0; j < num_lookups_per_batch; j++) {
-            K query = query_vector[j];
-            auto result = prepare->Execute(query);
-            lookup_count+=1;    
-            if(!result->HasError()){
-                sum+=1;
+            double key = lookup_keys[j];
+            // INDEX_PAYLOAD_TYPE* payload = double_index.get_payload(key); pointer returned
+            // INDEX_PAYLOAD_TYPE payload = double_dynamic_index.find(key)->second;
+            // std::cout<<"Key "<<key<<" Payload "<<*payload<<"\n";
+            if (double_dynamic_index.find(key) != double_dynamic_index.end()) {
+                std::cout<<"Payload is there! "<<"\n";
+                sum += double_dynamic_index.find(key)->second;
             }
             else{
-                std::cout<<"Error in lookup "<<lookup_count<<"\n";
+                std::cout<<"Payload is not here!! "<<"\n";
             }
-            
         }
         auto lookups_end_time = std::chrono::high_resolution_clock::now();
         batch_lookup_time = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -860,19 +851,144 @@ void runLookupBenchmarkArt(K *keys,duckdb::Connection &con,std::string benchmark
                     << std::endl;
         }
     }
+    long long cumulative_operations = cumulative_lookups + cumulative_inserts;
+    double cumulative_time = cumulative_lookup_time + cumulative_insert_time;
+    std::cout << "Cumulative stats: " << batch_no << " batches, "
+                << cumulative_operations << " ops (" << cumulative_lookups
+                << " lookups, " << cumulative_inserts << " inserts)"
+                << "\n\tcumulative throughput:\t"
+                << cumulative_lookups / cumulative_lookup_time * 1e9
+                << " lookups/sec,\t"
+                << cumulative_inserts / cumulative_insert_time * 1e9
+                << " inserts/sec,\t"
+                << cumulative_operations / cumulative_time * 1e9 << " ops/sec"
+                << std::endl;
 
+    delete[] keys;
+}
+
+template <>
+void runLookupBenchmarkPgm(INT64_KEY_TYPE *keys){
+
+
+    if(big_int_dynamic_index.size()==0){
+        std::cout<<"Index is empty. Please load the data into the index first."<<"\n";
+        return;
+    }
+
+    std::cout<<"Running benchmark workload "<<"\n";
+
+    int init_num_keys = load_end_point;
+    int total_num_keys = 400000;
+    int batch_size = 100000;
+    double insert_frac = 0.5;
+    string lookup_distribution = "zipf";
+    int i = init_num_keys;
+    long long cumulative_inserts = 0;
+    long long cumulative_lookups = 0;
+    int num_lookups_per_batch = batch_size;
+    double cumulative_lookup_time = 0;
+    double time_limit = 0.1;
+    bool print_batch_stats = true;
+    double elapsed_time_seconds = 0;
+
+    std::cout<<"Num lookups per batch "<<num_lookups_per_batch<<"\n";
+
+    
+    auto workload_start_time = std::chrono::high_resolution_clock::now();
+    int batch_no = 0;
+    INDEX_PAYLOAD_TYPE sum = 0;
+    std::cout << std::scientific;
+    std::cout << std::setprecision(3);
+
+    while (true) {
+        batch_no++;
+
+        // Do lookups
+        double batch_lookup_time = 0.0;
+        if (i > 0) {
+        int64_t* lookup_keys = nullptr;
+        if (lookup_distribution == "uniform") {
+            lookup_keys = get_search_keys(keys, i, num_lookups_per_batch);
+        } else if (lookup_distribution == "zipf") {
+            lookup_keys = get_search_keys_zipf(keys, i, num_lookups_per_batch);
+        } else {
+            std::cerr << "--lookup_distribution must be either 'uniform' or 'zipf'"
+                    << std::endl;
+            //return 1;
+        }
+        auto lookups_start_time = std::chrono::high_resolution_clock::now();
+        for (int j = 0; j < num_lookups_per_batch; j++) {
+            int64_t key = lookup_keys[j];
+            // INDEX_PAYLOAD_TYPE* payload = big_int_dynamic_index.get_payload(key);
+            //std::cout<<"Key "<<key<<" Payload "<<*payload<<"\n";
+            if (big_int_dynamic_index.find(key) != big_int_dynamic_index.end())  {
+                //std::cout<<"Payload is there! "<<"\n";
+                sum += big_int_dynamic_index.find(key)->second;
+            }
+            else{
+                std::cout<<"Payload is not here!! "<<"\n";
+            }
+        }
+        auto lookups_end_time = std::chrono::high_resolution_clock::now();
+
+        auto elapsed_seconds = lookups_end_time - lookups_start_time;
+        elapsed_time_seconds = elapsed_seconds.count();
+
+        batch_lookup_time = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                lookups_end_time - lookups_start_time)
+                                .count();
+        cumulative_lookup_time += batch_lookup_time;
+        cumulative_lookups += num_lookups_per_batch;
+        delete[] lookup_keys;
+        }
+        double workload_elapsed_time =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::high_resolution_clock::now() - workload_start_time)
+                .count();
+        if (workload_elapsed_time > time_limit * 1e9 * 60) {
+            break;
+        }
+        if (print_batch_stats) {
+            int num_batch_operations = num_lookups_per_batch;
+            double batch_time = batch_lookup_time;
+            long long cumulative_operations = cumulative_lookups;
+            double cumulative_time = cumulative_lookup_time;
+            std::cout << "Batch " << batch_no
+                        <<"Batch lookup time "<<elapsed_time_seconds<<"\n"
+                        << ", cumulative ops: " << cumulative_operations
+                        << "\n\tbatch throughput:\t"
+                        << num_lookups_per_batch / batch_lookup_time * 1e9
+                        << " lookups/sec,\t"
+                        << cumulative_lookups / cumulative_lookup_time * 1e9
+                        << " lookups/sec,\t"
+                        << cumulative_operations / cumulative_time * 1e9 << " ops/sec"
+                        << std::endl;
+            }
+    }
+    // long long avg_lookup_time_per_batch = cumulative_lookups/batch_no;
+    // std::cout<<"Average number of lookups per batch "<<avg_lookup_operations_per_batch<<"\n";
     long long cummulative_time = cumulative_lookup_time;
     std::cout<<"Cumulative time "<<cummulative_time<<"\n";
     std::cout<<"Cumulative lookups "<<cumulative_lookups<<"\n";
     std::cout<<"Throughput : "<< cumulative_lookups / cumulative_lookup_time * 1e9<<"ops/sec\n";
-    
+    // long long cumulative_operations = cumulative_lookups + cumulative_inserts;
+    // double cumulative_time = cumulative_lookup_time + cumulative_insert_time;
+    // std::cout << "Cumulative stats: " << batch_no << " batches, "
+    //             << cumulative_operations << " ops (" << cumulative_lookups
+    //             << " lookups, " << cumulative_inserts << " inserts)"
+    //             << "\n\tcumulative throughput:\t"
+    //             << cumulative_lookups / cumulative_lookup_time * 1e9
+    //             << " lookups/sec,\t"
+    //             << cumulative_inserts / cumulative_insert_time * 1e9
+    //             << " inserts/sec,\t"
+    //             << cumulative_operations / cumulative_time * 1e9 << " ops/sec"
+    //             << std::endl;
+
     delete[] keys;
-
-    if(lookup_count == sum){
-        std::cout<<"All operations done!\n";
-    }
-
 }
+
+
 
 void functionRunLookupBenchmark(ClientContext &context, const FunctionParameters &parameters){
     std::cout<<"Running lookup benchmark"<<"\n";
@@ -882,52 +998,65 @@ void functionRunLookupBenchmark(ClientContext &context, const FunctionParameters
 
     std::string keys_file_path = "";
     if(benchmarkName == "lognormal"){
-        keys_file_path = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/lognormal-190M.bin.data";
+        keys_file_path = "/Users/maitrithaker/Desktop/proj/intelligent-duck/lognormal-190M.bin";
         auto keys = new INT64_KEY_TYPE[load_end_point];
         std::cout<<"Loading binary data "<<std::endl;
         load_binary_data(keys, load_end_point, keys_file_path);
         if(index == "alex"){
             runLookupBenchmarkAlex<INT64_KEY_TYPE>(keys);
         }
-        else{
-            runLookupBenchmarkArt<INT64_KEY_TYPE>(keys,con,benchmarkName);
+        else if(index=="pgm"){
+            runLookupBenchmarkPgm<INT64_KEY_TYPE>(keys);
         }
+        
+        // else{
+        //     runLookupBenchmarkArt<INT64_KEY_TYPE>(keys,con,benchmarkName);
+        // }
     }
     else if(benchmarkName == "longlat"){
-        keys_file_path = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/longlat-200M.bin.data";
+        keys_file_path = "/Users/maitrithaker/Desktop/proj/intelligent-duck/longlat-200M.bin";
         auto keys = new DOUBLE_KEY_TYPE[load_end_point];
         std::cout<<"Loading binary data "<<std::endl;
         load_binary_data(keys, load_end_point, keys_file_path);
         if(index == "alex"){
             runLookupBenchmarkAlex<DOUBLE_KEY_TYPE>(keys);
         }
-        else{
-            runLookupBenchmarkArt<DOUBLE_KEY_TYPE>(keys,con,benchmarkName);
+        else if(index=="pgm"){
+            runLookupBenchmarkPgm<DOUBLE_KEY_TYPE>(keys);
         }
+        // else{
+        //     runLookupBenchmarkArt<DOUBLE_KEY_TYPE>(keys,con,benchmarkName);
+        // }
     }
     else if(benchmarkName=="ycsb"){
-        keys_file_path = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/ycsb-200M.bin.data";
+        keys_file_path = "/Users/maitrithaker/Desktop/proj/intelligent-duck/ycsb-200M.bin";
         auto keys = new INT64_KEY_TYPE[load_end_point];
         std::cout<<"Loading binary data "<<std::endl;
         load_binary_data(keys, load_end_point, keys_file_path);
         if(index == "alex"){
             runLookupBenchmarkAlex<INT64_KEY_TYPE>(keys);
         }
-        else{
-            runLookupBenchmarkArt<INT64_KEY_TYPE>(keys,con,benchmarkName);
+        else if(index=="pgm"){
+            runLookupBenchmarkPgm<INT64_KEY_TYPE>(keys);
         }
+        // else{
+        //     runLookupBenchmarkArt<INT64_KEY_TYPE>(keys,con,benchmarkName);
+        // }
     }
     else if(benchmarkName == "longitudes"){
-        keys_file_path = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/longitudes-200M.bin.data";
+        keys_file_path = "/Users/maitrithaker/Desktop/proj/intelligent-duck/longitudes-200M.bin";
         auto keys = new DOUBLE_KEY_TYPE[load_end_point];
         std::cout<<"Loading binary data "<<std::endl;
         load_binary_data(keys, load_end_point, keys_file_path); 
         if(index == "alex"){
             runLookupBenchmarkAlex<DOUBLE_KEY_TYPE>(keys);
         }
-        else{
-            runLookupBenchmarkArt<DOUBLE_KEY_TYPE>(keys,con,benchmarkName);
+        else if(index=="pgm"){
+            runLookupBenchmarkPgm<DOUBLE_KEY_TYPE>(keys);
         }
+        // else{
+        //     runLookupBenchmarkArt<DOUBLE_KEY_TYPE>(keys,con,benchmarkName);
+        // }
     }
 
 }
@@ -1445,19 +1574,19 @@ void runInsertionBenchmarkWorkload(duckdb::Connection& con,std::string benchmark
     std::string benchmarkFileType = "";
 
     if(benchmarkName.compare("lognormal")==0){
-        benchmarkFile = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/lognormal-190M.bin.data";
+        benchmarkFile = "/Users/maitrithaker/Desktop/proj/intelligent-duck/lognormal-190M.bin";
         benchmarkFileType = "binary";
     }
     else if(benchmarkName.compare("longitudes")==0){
-        benchmarkFile = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/longitudes-200M.bin.data";
+        benchmarkFile = "/Users/maitrithaker/Desktop/proj/intelligent-duck/longitudes-200M.bin";
         benchmarkFileType = "binary";
     }
     else if(benchmarkName.compare("longlat")==0){
-        benchmarkFile = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/longlat-200M.bin.data";
+        benchmarkFile = "/Users/maitrithaker/Desktop/proj/intelligent-duck/longlat-200M.bin";
         benchmarkFileType = "binary";
     }
     else if(benchmarkName.compare("ycsb")==0){
-        benchmarkFile = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/ycsb-200M.bin.data";
+        benchmarkFile = "/Users/maitrithaker/Desktop/proj/intelligent-duck/ycsb-200M.bin";
         benchmarkFileType = "binary";
     }
 
@@ -1518,19 +1647,19 @@ void runInsertionBenchmarkWorkloadART(duckdb::Connection& con,std::string benchm
     std::string benchmarkFileType = "";
 
     if(benchmarkName.compare("lognormal")==0){
-        benchmarkFile = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/lognormal-190M.bin.data";
+        benchmarkFile = "/Users/maitrithaker/Desktop/proj/intelligent-duck/lognormal-190M.bin";
         benchmarkFileType = "binary";
     }
     else if(benchmarkName.compare("longitudes")==0){
-        benchmarkFile = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/longitudes-200M.bin.data";
+        benchmarkFile = "/Users/maitrithaker/Desktop/proj/intelligent-duck/longitudes-200M.bin";
         benchmarkFileType = "binary";
     }
     else if(benchmarkName.compare("longlat")==0){
-        benchmarkFile = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/longlat-200M.bin.data";
+        benchmarkFile = "/Users/maitrithaker/Desktop/proj/intelligent-duck/longlat-200M.bin";
         benchmarkFileType = "binary";
     }
     else if(benchmarkName.compare("ycsb")==0){
-        benchmarkFile = "/Users/bhargavkrish/Desktop/USC/Duck_Extension/trial-3/intelligent-duck/src/ycsb-200M.bin.data";
+        benchmarkFile = "/Users/maitrithaker/Desktop/proj/intelligent-duck/ycsb-200M.bin";
         benchmarkFileType = "binary";
     }
 
@@ -1738,8 +1867,335 @@ void functionAuxStorage(ClientContext &context, const FunctionParameters &parame
     double total_size_in_mb = static_cast<double>(total_size) / (1024 * 1024);
     std::cout<<"Auxillary storage size "<<total_size_in_mb<<" MB\n";
 }
+template <typename K>
+void print_stats_pgm(){
+    if(typeid(K)==typeid(DOUBLE_KEY_TYPE)){
+        std::cout << "Total size in bytes: " << double_dynamic_index.size_in_bytes() << " bytes\n";
+        std::cout << "Index size in bytes: " << double_dynamic_index.index_size_in_bytes() << " bytes\n";
+        std::cout << "Number of elements: " << double_dynamic_index.size() << "\n";
+
+    }
+    else if(typeid(K)==typeid(UNSIGNED_INT64_KEY_TYPE)){
+        std::cout << "Total size in bytes: " << unsigned_big_int_dynamic_index.size_in_bytes() << " bytes\n";
+        std::cout << "Index size in bytes: " << unsigned_big_int_dynamic_index.index_size_in_bytes() << " bytes\n";
+        std::cout << "Number of elements: " << unsigned_big_int_dynamic_index.size() << "\n";
+    }
+    else if(typeid(K)==typeid(INT_KEY_TYPE)){
+        std::cout << "Total size in bytes: " << int_dynamic_index.size_in_bytes() << " bytes\n";
+        std::cout << "Index size in bytes: " << int_dynamic_index.index_size_in_bytes() << " bytes\n";
+        std::cout << "Number of elements: " << int_dynamic_index.size() << "\n";
+    }
+    else{ //big int
+        std::cout << "Total size in bytes: " << big_int_dynamic_index.size_in_bytes() << " bytes\n";
+        std::cout << "Big Int Dynamic Index size in bytes: " << big_int_dynamic_index.index_size_in_bytes() << " bytes\n";
+        std::cout << "Number of elements: " << big_int_dynamic_index.size() << "\n";
+    }
+
+}
+template <typename K,typename P>
+void bulkLoadIntoIndexPGM(duckdb::Connection & con,std::string table_name,int column_index){
+    std::cout<<"General Function with no consequence.\n"; 
+}
+
+template<>
+void bulkLoadIntoIndexPGM<double,INDEX_PAYLOAD_TYPE>(duckdb::Connection & con,std::string table_name,int column_index){
+/*
+    Phase 1: Load the data from the table.
+    */
+    string query = "SELECT * FROM "+table_name+";";
+    unique_ptr<MaterializedQueryResult> result = con.Query(query);
+    results = result->getContents();
+    int num_keys = results.size();
+    //std::cout<<"Num Keys : "<<num_keys<<"\n";
+
+   /*
+    Phase 2: Bulk load the data from the results vector into the pair array that goes into the index.
+   */
+   std::vector<std::pair<double,INDEX_PAYLOAD_TYPE>> bulk_load_values;
+   bulk_load_values.reserve(num_keys);
+
+ 
+    int max_key = INT_MIN;
+    for (int i=0;i<results.size();i++){
+        int row_id = i;
+        //std::cout<<"before key"<<"\n";
+        auto *data = dynamic_cast<Base *>(results[i][column_index].get());
+        auto *data1 = dynamic_cast<Base *>(results[i][column_index + 1].get());
+        
+        double key_ = static_cast<double_t>(static_cast<DoubleData *>(data)->value);
+        double value_ = static_cast<double_t>(static_cast<DoubleData *>(data1)->value);
+        
+        //std::cout<<"after key"<<"\n";
+        bulk_load_values.emplace_back(key_,value_);
+    }
+    /**
+     Phase 3: Sort the bulk load values array based on the key values.
+    */
+
+    auto start_time = std::chrono::high_resolution_clock::now();
+    std::sort(bulk_load_values.begin(),bulk_load_values.end(),[](auto const& a, auto const& b) { return a.first < b.first; });
+
+    /*
+    Phase 4: Bulk load the sorted values into the index.
+    */
 
 
+     for (const auto &pair : bulk_load_values) {
+        double_dynamic_index.insert_or_assign(pair.first, pair.second);
+    }
+    
+    auto end_time = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed_seconds = end_time - start_time;
+    std::cout << "Time taken to bulk load: " << elapsed_seconds.count() << " seconds\n\n\n";
+    print_stats_pgm<DOUBLE_KEY_TYPE>();
+}
+
+template<>
+void bulkLoadIntoIndexPGM<int64_t,INDEX_PAYLOAD_TYPE>(duckdb::Connection & con,std::string table_name,int column_index){
+/*
+    Phase 1: Load the data from the table.
+    */
+    string query = "SELECT * FROM "+table_name+";";
+    unique_ptr<MaterializedQueryResult> result = con.Query(query);
+    results = result->getContents();
+    int num_keys = results.size();
+    std::cout<<"Num Keys : "<<num_keys<<"\n";
+
+   /*
+    Phase 2: Bulk load the data from the results vector into the pair array that goes into the index.
+   */
+//    std::pair<int64_t,INDEX_PAYLOAD_TYPE>* bulk_load_values = new std::pair<int64_t,INDEX_PAYLOAD_TYPE>[num_keys];
+
+   std::vector<std::pair<double,INDEX_PAYLOAD_TYPE>> bulk_load_values;
+   bulk_load_values.reserve(num_keys);
+
+    std::cout<<"Col index "<<column_index<<"\n";    
+    int max_key = INT_MIN;
+    for (int i=0;i<results.size();i++){
+        int row_id = i;
+        std::cout<<"before key"<<"\n";
+        auto *data = dynamic_cast<Base *>(results[i][column_index].get());
+        auto *data1 = dynamic_cast<Base *>(results[i][column_index + 1].get());
+        
+        int64_t key_ = static_cast<int64_t>(static_cast<BigIntData *>(data)->value);
+        double value_ = static_cast<double_t>(static_cast<DoubleData *>(data1)->value);
+        
+        // std::cout<<"after key: "<<key_<<" Value: "<<value_<<"\n";
+
+        bulk_load_values.emplace_back(key_,value_);
+
+        std::cout<<"Bulk Load values : "<<bulk_load_values[i].first<<" "<<bulk_load_values[i].second<<"\n";
+    }
+
+    std::cout<<"Bulk Load Values Size Before Sort: "<<bulk_load_values.size()<<"\n";
+
+    /**
+     Phase 3: Sort the bulk load values array based on the key values.
+    */
+   //Measure time 
+    
+    auto start_time = std::chrono::high_resolution_clock::now();
+    std::sort(bulk_load_values.begin(),bulk_load_values.end(),[](auto const& a, auto const& b) { return a.first < b.first; });
+    
+    /*
+    Phase 4: Bulk load the sorted values into the index.
+    */
+
+    std::cout<<"Bulk Load Values Size : "<<bulk_load_values.size()<<"\n";
+    
+    // big_int_dynamic_index.bulk_load(bulk_load_values, num_keys);
+
+    for (const auto &pair : bulk_load_values) {
+        std::cout<<"Key : "<<pair.first<<" Value : "<<pair.second<<"\n";
+        big_int_dynamic_index.insert_or_assign(pair.first, pair.second);
+        std::cout<<"Index Size : "<<big_int_dynamic_index.size()<<"\n";
+    }
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed_seconds = end_time - start_time;
+    std::cout << "Time taken to bulk load: " << elapsed_seconds.count() <<" seconds\n\n\n";
+    print_stats_pgm<INT64_KEY_TYPE>();
+}
+
+template<>
+void bulkLoadIntoIndexPGM<UNSIGNED_INT64_KEY_TYPE,INDEX_PAYLOAD_TYPE>(duckdb::Connection & con,std::string table_name,int column_index){
+/*
+    Phase 1: Load the data from the table.
+    */
+    string query = "SELECT * FROM "+table_name+";";
+    unique_ptr<MaterializedQueryResult> result = con.Query(query);
+    results = result->getContents();
+    int num_keys = results.size();
+    //std::cout<<"Num Keys : "<<num_keys<<"\n";
+
+   /*
+    Phase 2: Bulk load the data from the results vector into the pair array that goes into the index.
+   */
+//    std::pair<UNSIGNED_INT64_KEY_TYPE,INDEX_PAYLOAD_TYPE>* bulk_load_values = new std::pair<UNSIGNED_INT64_KEY_TYPE,INDEX_PAYLOAD_TYPE>[num_keys];
+    //std::cout<<"Col index "<<column_index<<"\n";    
+    std::vector<std::pair<double,INDEX_PAYLOAD_TYPE>> bulk_load_values;
+    bulk_load_values.reserve(num_keys);
+
+    int max_key = INT_MIN;
+    for (int i=0;i<results.size();i++){
+        int row_id = i;
+        //std::cout<<"before key"<<"\n";
+        auto *data = dynamic_cast<Base *>(results[i][column_index].get());
+        auto *data1 = dynamic_cast<Base *>(results[i][column_index + 1].get());
+        
+        UNSIGNED_INT64_KEY_TYPE key_ = static_cast<u_int64_t>(static_cast<UBigIntData *>(data)->value);
+        double value_ = static_cast<double_t>(static_cast<DoubleData *>(data1)->value);
+        
+        //std::cout<<"after key"<<"\n";
+        bulk_load_values.emplace_back(key_,value_);
+    }
+    /**
+     Phase 3: Sort the bulk load values array based on the key values.
+    */
+   //Measure time 
+    
+    auto start_time = std::chrono::high_resolution_clock::now();
+    std::sort(bulk_load_values.begin(),bulk_load_values.end(),[](auto const& a, auto const& b) { return a.first < b.first; });
+    
+    /*
+    Phase 4: Bulk load the sorted values into the index.
+    */
+    
+    // unsigned_big_int_dynamic_index.bulk_load(bulk_load_values, num_keys);
+
+    for (const auto &pair : bulk_load_values) {
+        unsigned_big_int_dynamic_index.insert_or_assign(pair.first, pair.second);
+    }
+
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed_seconds = end_time - start_time;
+    std::cout << "Time taken to bulk load: " << elapsed_seconds.count() <<" seconds\n\n\n";
+    print_stats_pgm<UNSIGNED_INT64_KEY_TYPE>();
+}
+
+template<>
+void bulkLoadIntoIndexPGM<INT_KEY_TYPE,INDEX_PAYLOAD_TYPE>(duckdb::Connection & con,std::string table_name,int column_index){
+/*
+    Phase 1: Load the data from the table.
+    */
+    string query = "SELECT * FROM "+table_name+";";
+    unique_ptr<MaterializedQueryResult> result = con.Query(query);
+    results = result->getContents();
+    int num_keys = results.size();
+    std::cout<<"Num Keys : "<<num_keys<<"\n";
+
+   /*
+    Phase 2: Bulk load the data from the results vector into the pair array that goes into the index.
+   */
+//    std::pair<INT_KEY_TYPE,INDEX_PAYLOAD_TYPE>* bulk_load_values = new std::pair<INT_KEY_TYPE,INDEX_PAYLOAD_TYPE>[num_keys];
+    std::cout<<"Col index "<<column_index<<"\n";    
+    std::vector<std::pair<INT_KEY_TYPE,INDEX_PAYLOAD_TYPE>> bulk_load_values;
+    bulk_load_values.reserve(num_keys);
+
+
+    int max_key = INT_MIN;
+    for (int i=0;i<results.size();i++){
+        int row_id = i;
+        if(results[i][column_index]) {
+        std::cout<<"before key"<<"\n";
+        auto *data = dynamic_cast<Base *>(results[i][column_index].get());
+        auto *data1 = dynamic_cast<Base *>(results[i][column_index + 1].get());
+        //auto rrr = results[i][column_index].get();
+        
+        INT_KEY_TYPE key_ = static_cast<int32_t>(static_cast<IntData *>(data)->value);
+        double value_ = static_cast<double_t>(static_cast<DoubleData *>(data1)->value);
+
+        std::cout<<"after key"<<"\n";
+        bulk_load_values.emplace_back(key_,  static_cast<INDEX_PAYLOAD_TYPE>(i));
+        std::cout<<"Key : "<<key_<<" Value : "<<value_<<"\n";
+        }
+    }
+    /**
+     Phase 3: Sort the bulk load values array based on the key values.
+    */
+   //Measure time 
+    
+    auto start_time = std::chrono::high_resolution_clock::now();
+    std::sort(bulk_load_values.begin(),bulk_load_values.end(),[](auto const& a, auto const& b) { return a.first < b.first; });
+    
+    /*
+    Phase 4: Bulk load the sorted values into the index.
+    */
+    
+    // index.bulk_load(bulk_load_values, num_keys);
+
+     for (const auto &pair : bulk_load_values) {
+        std::cout<<"Key : "<<pair.first<<" Value : "<<pair.second<<"\n";
+        int_dynamic_index.insert_or_assign(pair.first, pair.second);
+    }
+
+
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed_seconds = end_time - start_time;
+    std::cout << "Time taken to bulk load: " << elapsed_seconds.count() <<" seconds\n\n\n";
+    print_stats_pgm<INT_KEY_TYPE>();
+}
+
+void createPGMIndexPragmaFunction(ClientContext &context, const FunctionParameters &parameters){
+    string table_name = parameters.values[0].GetValue<string>();
+    string column_name = parameters.values[1].GetValue<string>();
+
+    QualifiedName qname = GetQualifiedName(context, table_name);
+    // CheckIfTableExists(context, qname);
+    auto &table = Catalog::GetEntry<TableCatalogEntry>(context, qname.catalog, qname.schema, qname.name);
+    auto &columnList = table.GetColumns(); 
+
+    vector<string>columnNames = columnList.GetColumnNames();
+    vector<LogicalType>columnTypes = columnList.GetColumnTypes();
+    int count = 0;
+    int column_index = -1;
+    LogicalType column_type;
+    int col_i = 0;
+    for(col_i=0;col_i<columnNames.size();col_i++){
+        string curr_col_name = columnNames[col_i];
+        LogicalType curr_col_type = columnTypes[col_i];
+        if(curr_col_name == column_name){
+            column_index = count;
+            column_type = curr_col_type;
+        }
+        count++;
+    }
+
+    if(column_index == -1){
+        std::cout<<"Column not found "<<"\n";
+    }
+    else{
+        duckdb::Connection con(*context.db);
+        std::cout<<"Column found at index "<<column_index<<"\n";
+        std::cout<<"Creating an pgm index for this column"<<"\n";
+        // std::cout<<"Column Type "<<typeid(column_type).name()<<"\n";
+        // std::cout<<"Column Type "<<typeid(double).name()<<"\n";
+        std::cout<<"Column type to string "<<column_type.ToString()<<"\n";
+        std::string columnTypeName = column_type.ToString();
+        if(columnTypeName == "DOUBLE"){
+            bulkLoadIntoIndexPGM<DOUBLE_KEY_TYPE,INDEX_PAYLOAD_TYPE>(con,table_name,column_index);
+            index_type_table_name_map.insert({"double",{table_name,column_name}});
+        }
+        else if(columnTypeName == "BIGINT"){
+            bulkLoadIntoIndexPGM<INT64_KEY_TYPE,INDEX_PAYLOAD_TYPE>(con,table_name,column_index);
+            index_type_table_name_map.insert({"bigint",{table_name,column_name}});
+        }
+        else if(columnTypeName == "UBIGINT"){
+            bulkLoadIntoIndexPGM<UNSIGNED_INT64_KEY_TYPE,INDEX_PAYLOAD_TYPE>(con,table_name,column_index);
+            index_type_table_name_map.insert({"ubigint",{table_name,column_name}});
+        }
+        else if(columnTypeName == "INTEGER"){
+            bulkLoadIntoIndexPGM<INT_KEY_TYPE,INDEX_PAYLOAD_TYPE>(con,table_name,column_index);
+            index_type_table_name_map.insert({"int",{table_name,column_name}});
+        }
+        else{
+            std::cout<<"Unsupported column type for alex indexing (for now) "<<"\n";
+        }
+        //bulkLoadIntoIndex<typeid(column_type).name(),INDEX_PAYLOAD_TYPE>(con,table_name,column_index);
+    }
+}
 /**
  * Load Functions: 
  * 
@@ -1757,7 +2213,9 @@ static void LoadInternal(DatabaseInstance &instance) {
 
     auto create_alex_index_function = PragmaFunction::PragmaCall("create_alex_index", createAlexIndexPragmaFunction, {LogicalType::VARCHAR, LogicalType::VARCHAR},{});
     ExtensionUtil::RegisterFunction(instance, create_alex_index_function);
-
+    auto create_pgm_index_function = PragmaFunction::PragmaCall("create_pgm_index", createPGMIndexPragmaFunction, {LogicalType::VARCHAR, LogicalType::VARCHAR},{});
+    ExtensionUtil::RegisterFunction(instance, create_pgm_index_function);
+    
     // The arguments for the load benchmark data function are the table name, benchmark name and the number of elements to bulk load.
     auto loadBenchmarkData = PragmaFunction::PragmaCall("load_benchmark",functionLoadBenchmark,{LogicalType::VARCHAR,LogicalType::VARCHAR,LogicalType::INTEGER,LogicalType::INTEGER},{});
     ExtensionUtil::RegisterFunction(instance,loadBenchmarkData);
@@ -1797,7 +2255,7 @@ std::string AlexExtension::Name() {
 	return "alex";
 }
 
-} // namespace duckdb
+}// namespace duckdb
 
 extern "C" {
 
