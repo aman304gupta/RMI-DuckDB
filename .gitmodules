@@ -8,3 +8,6 @@
 [submodule "src/ALEX"]
 	path = src/ALEX
 	url = https://github.com/bhargav191098/ALEX.git
+[submodule "src/PGM-index"]
+	path = src/PGM-index
+	url = https://github.com/gvinciguerra/PGM-index.git
